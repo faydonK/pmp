@@ -1,74 +1,137 @@
-#include "rgb_lcd.h"  // Gardons seulement cette bibliothèque
+#include <LiquidCrystal.h>
 
+// Configuration
 #define MQ_PIN A0
-#define R0 10.0  // Résistance de référence en air propre (à calibrer)
+#define R0 10.0
 
-rgb_lcd lcd;
+// Grove LCD - pins standards
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 
-const int colorR = 255;
-const int colorG = 0;
-const int colorB = 0;
-
-int currentGas = 0;  // Index du gaz actuellement affiché
+// Variables
+int loopCount = 0;
 unsigned long lastUpdate = 0;
-const unsigned long updateInterval = 3000;  // 3 secondes entre chaque gaz
+const unsigned long updateInterval = 2000; // 2 secondes
 
 void setup() {
+  // Console de debug Arduino IDE
   Serial.begin(9600);
-  lcd.begin(16, 2);
-  lcd.setRGB(colorR, colorG, colorB);
+  Serial.println("=== ARDUINO UNO - CAPTEUR POLLUTION ===");
+  Serial.println("Grove LCD + MQ-2 initialisé");
+  Serial.println("Debug: Ouvrir Moniteur Série (Ctrl+Shift+M)");
+  Serial.println("=====================================");
   
-  // Message initial
+  // LCD
+  Serial.println("DEBUG: Initialisation LCD...");
+  lcd.begin(16, 2);
+  
+  // Message fixe sur l'écran
   lcd.setCursor(0, 0);
-  lcd.print("Pollution d'air:");
-  lcd.setCursor(0, 1);
-  lcd.print("Initialisation..");
-  delay(2000);
-  lcd.clear();
+  lcd.print("Pollution:");
+  Serial.println("DEBUG: 'Pollution:' affiché ligne 1");
+  
+  // Test initial capteur
+  int testValue = analogRead(MQ_PIN);
+  Serial.print("DEBUG: Test capteur initial = ");
+  Serial.println(testValue);
+  
+  delay(1000);
+  Serial.println("DEBUG: Setup terminé, début loop...");
+  Serial.println("");
 }
 
 void loop() {
-  // Lecture du capteur
-  int sensorValue = analogRead(MQ_PIN);
-  float sensorVoltage = sensorValue * (5.0 / 1023.0);
+  loopCount++;
   
-  // Calcul de la résistance du capteur
-  float RS_gas = ((5.0 * 10.0) / sensorVoltage) - 10.0;  // Avec une résistance de charge de 10kΩ
-  float ratio = RS_gas / R0;
-  
-  // Calcul des concentrations (formules approximatives)
-  float concentrations[6];
-  concentrations[0] = 1000 * pow(ratio, -1.29);  // CH4 (Méthane)
-  concentrations[1] = 1000 * pow(ratio, -1.21);  // C4H10 (Butane)
-  concentrations[2] = 1000 * pow(ratio, -1.16);  // C3H8 (Propane)
-  concentrations[3] = 1000 * pow(ratio, -1.24);  // H2 (Hydrogène)
-  concentrations[4] = 1000 * pow(ratio, -1.25);  // Alcool
-  concentrations[5] = 1000 * pow(ratio, -1.29);  // Fumée
-  
-  String gasNames[6] = {"Methane", "Butane", "Propane", "Hydrogene", "Alcool", "Fumee"};
-  
-  // Affichage rotatif toutes les 3 secondes
-  if (millis() - lastUpdate >= updateInterval) {
-    lcd.clear();
-    
-    // Première ligne : nom du gaz
-    lcd.setCursor(0, 0);
-    lcd.print(gasNames[currentGas]);
-    
-    // Deuxième ligne : concentration
-    lcd.setCursor(0, 1);
-    lcd.print(concentrations[currentGas], 1);
-    lcd.print(" ppm");
-    
-    // Affichage série pour débogage
-    Serial.print(gasNames[currentGas]);
-    Serial.print(": ");
-    Serial.print(concentrations[currentGas]);
-    Serial.println(" ppm");
-    
-    currentGas = (currentGas + 1) % 6;  // Passer au gaz suivant
-    lastUpdate = millis();
+  // DEBUG: Info loop
+  if (loopCount % 20 == 1) { // Tous les 20 loops
+    Serial.print("--- LOOP #");
+    Serial.print(loopCount);
+    Serial.println(" ---");
   }
   
-  delay(100);  // Petit délai pour éviter la surcharge
+  // === LECTURE CAPTEUR ===
+  Serial.println("DEBUG: Lecture capteur MQ-2...");
+  int sensorValue = analogRead(MQ_PIN);
+  Serial.print("  Valeur brute: ");
+  Serial.println(sensorValue);
+  
+  float voltage = sensorValue * (5.0 / 1023.0);
+  Serial.print("  Tension: ");
+  Serial.print(voltage, 3);
+  Serial.println(" V");
+  
+  // === CALCULS ===
+  Serial.println("DEBUG: Calculs de pollution...");
+  
+  // Vérification erreur
+  if (voltage <= 0.1) {
+    Serial.println("  ERREUR: Tension trop faible!");
+    lcd.setCursor(0, 1);
+    lcd.print("ERREUR CAPTEUR  ");
+    delay(1000);
+    return;
+  }
+  
+  // Calcul résistance
+  float RS = ((5.0 * 10.0) / voltage) - 10.0;
+  Serial.print("  Résistance: ");
+  Serial.print(RS, 2);
+  Serial.println(" kΩ");
+  
+  float ratio = RS / R0;
+  Serial.print("  Ratio RS/R0: ");
+  Serial.println(ratio, 3);
+  
+  // Calcul pollution générale (moyenne des gaz)
+  float pollution = 0;
+  pollution += 1000 * pow(ratio, -1.29);  // CH4
+  pollution += 1000 * pow(ratio, -1.21);  // Butane
+  pollution += 1000 * pow(ratio, -1.16);  // Propane
+  pollution += 1000 * pow(ratio, -1.24);  // H2
+  pollution += 1000 * pow(ratio, -1.25);  // Alcool
+  pollution += 1000 * pow(ratio, -1.29);  // Fumée
+  pollution = pollution / 6.0; // Moyenne
+  
+  Serial.print("  Pollution calculée: ");
+  Serial.print(pollution, 1);
+  Serial.println(" ppm");
+  
+  // === MISE À JOUR ÉCRAN ===
+  unsigned long now = millis();
+  if (now - lastUpdate >= updateInterval) {
+    Serial.println("DEBUG: Mise à jour écran LCD...");
+    
+    // Ligne 2: valeur de pollution
+    lcd.setCursor(0, 1);
+    
+    if (pollution < 1000) {
+      lcd.print(pollution, 0);
+      lcd.print(" ppm      "); // Espaces pour effacer ancien texte
+      Serial.print("  Affiché: ");
+      Serial.print(pollution, 0);
+      Serial.println(" ppm");
+    } else {
+      lcd.print("DANGER!       ");
+      Serial.println("  Affiché: DANGER!");
+    }
+    
+    lastUpdate = now;
+    Serial.println("DEBUG: Écran mis à jour");
+  }
+  
+  // === ANALYSE QUALITÉ AIR ===
+  Serial.print("DEBUG: Qualité air = ");
+  if (pollution < 50) {
+    Serial.println("BONNE");
+  } else if (pollution < 100) {
+    Serial.println("MOYENNE");
+  } else if (pollution < 200) {
+    Serial.println("MAUVAISE");
+  } else {
+    Serial.println("DANGEREUSE");
+  }
+  
+  Serial.println(""); // Ligne vide pour lisibilité
+  
+  delay(500); // Attente 0.5 seconde
 }

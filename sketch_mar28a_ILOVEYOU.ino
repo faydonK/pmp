@@ -1,168 +1,82 @@
 #include <LiquidCrystal.h>
 
-// ========================================
-// CONFIGURATION DES PINS
-// ========================================
-
-// CAPTEUR MQ-2 (Détecteur de gaz)
-#define MQ_PIN A0    // Pin analogique A0
-
-// ÉCRAN LCD 16x2 (6 pins requis)
-// Format: LiquidCrystal(RS, Enable, D4, D5, D6, D7)
+// Configuration de l'écran LCD 16x2
+// Connexions: RS, Enable, D4, D5, D6, D7
 LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
-//                |   |   |  |  |  |
-//                |   |   |  |  |  └── Pin 2 (D7)
-//                |   |   |  |  └───── Pin 3 (D6)  
-//                |   |   |  └──────── Pin 4 (D5)
-//                |   |   └─────────── Pin 5 (D4)
-//                |   └───────────── Pin 11 (Enable)
-//                └───────────────── Pin 12 (RS)
 
-// ========================================
-// BRANCHEMENTS DÉTAILLÉS
-// ========================================
-/*
-ÉCRAN LCD 16x2 → ARDUINO UNO
-┌─────────────┬─────────────┬─────────────────┐
-│ Pin LCD     │ Arduino     │ Description     │
-├─────────────┼─────────────┼─────────────────┤
-│ Pin 1 (VSS) │ GND         │ Masse           │
-│ Pin 2 (VDD) │ 5V          │ Alimentation    │
-│ Pin 3 (V0)  │ GND         │ Contraste ⚠️    │
-│ Pin 4 (RS)  │ Pin 12      │ Register Select │
-│ Pin 5 (E)   │ Pin 11      │ Enable          │
-│ Pin 6-9     │ (vide)      │ Non utilisés    │
-│ Pin 10 (D4) │ Pin 5       │ Données bit 4   │
-│ Pin 11 (D5) │ Pin 4       │ Données bit 5   │
-│ Pin 12 (D6) │ Pin 3       │ Données bit 6   │
-│ Pin 13 (D7) │ Pin 2       │ Données bit 7   │
-│ Pin 14 (A)  │ 5V          │ Rétroéclairage+ │
-│ Pin 15 (K)  │ GND         │ Rétroéclairage- │
-└─────────────┴─────────────┴─────────────────┘
+// Pin du capteur MQ-2
+const int MQ2_PIN = A0;
 
-CAPTEUR MQ-2 → ARDUINO UNO
-┌─────────────┬─────────────┬─────────────────┐
-│ MQ-2        │ Arduino     │ Description     │
-├─────────────┼─────────────┼─────────────────┤
-│ VCC         │ 5V          │ Alimentation    │
-│ GND         │ GND         │ Masse           │
-│ A0          │ A0          │ Signal analogique│
-└─────────────┴─────────────┴─────────────────┘
+// Variables pour la calibration
+int sensorValue = 0;
+float voltage = 0;
+float ratio = 0;
+float ppm = 0;
 
-⚠️ IMPORTANT: Pin 3 (V0) du LCD DOIT être sur GND pour éviter les carrés !
-*/
+// Valeurs de référence pour la calibration (à ajuster selon votre environnement)
+const float R0 = 10.0; // Résistance de référence en air propre (à calibrer)
+const float RL = 5.0;  // Résistance de charge (5kΩ)
 
-// ========================================
-// VARIABLES GLOBALES
-// ========================================
-unsigned long derniereMesure = 0;
-const unsigned long INTERVALLE = 1000;  // 1 seconde
-
-// ========================================
-// FONCTION SETUP (EXÉCUTÉE UNE FOIS)
-// ========================================
 void setup() {
-  // === INITIALISATION COMMUNICATION SÉRIE ===
+  // Initialisation du moniteur série
   Serial.begin(9600);
-  Serial.println("╔══════════════════════════════════════╗");
-  Serial.println("║      CAPTEUR POLLUTION MQ-2          ║");
-  Serial.println("║      Arduino UNO + LCD 16x2          ║");
-  Serial.println("╚══════════════════════════════════════╝");
-  Serial.println();
   
-  // === INITIALISATION LCD ===
-  Serial.println("🔧 Initialisation de l'écran LCD...");
-  delay(1000);        // Attente stabilisation
-  lcd.begin(16, 2);   // 16 colonnes, 2 lignes
-  delay(500);
-  lcd.clear();        // Effacer l'écran
-  delay(200);
+  // Initialisation de l'écran LCD
+  lcd.begin(16, 2);
+  lcd.print("Capteur Pollution");
+  lcd.setCursor(0, 1);
+  lcd.print("Initialisation...");
   
-  // === TEST LCD ===
-  Serial.println("🧪 Test d'affichage LCD...");
-  lcd.setCursor(0, 0);
-  lcd.print("Demarrage...");
-  delay(1000);
+  // Temps de chauffe du capteur MQ-2 (recommandé: 20 secondes minimum)
+  delay(20000);
+  
   lcd.clear();
-  
-  // === AFFICHAGE TITRE PERMANENT ===
-  lcd.setCursor(0, 0);
-  lcd.print("Pollution:");
-  Serial.println("✅ LCD initialisé avec succès");
-  
-  // === TEST CAPTEUR INITIAL ===
-  Serial.println("🔍 Test du capteur MQ-2...");
-  int valeurTest = analogRead(MQ_PIN);
-  Serial.print("   Valeur initiale: ");
-  Serial.println(valeurTest);
-  
-  if (valeurTest == 0) {
-    Serial.println("⚠️  ATTENTION: Capteur peut-être déconnecté");
-  } else {
-    Serial.println("✅ Capteur MQ-2 détecté");
-  }
-  
-  Serial.println();
-  Serial.println("🚀 Système prêt - Début des mesures...");
-  Serial.println("=====================================");
+  lcd.print("Pret!");
+  delay(1000);
 }
 
-// ========================================
-// FONCTION LOOP (EXÉCUTÉE EN BOUCLE)
-// ========================================
 void loop() {
-  // === LECTURE DU CAPTEUR ===
-  int valeurBrute = analogRead(MQ_PIN);
+  // Lecture de la valeur analogique du capteur
+  sensorValue = analogRead(MQ2_PIN);
   
-  // === CONVERSION EN PPM ===
-  // Conversion simple: 0-1023 → 0-500 ppm
-  float niveauPollution = map(valeurBrute, 0, 1023, 0, 500);
+  // Conversion en tension (0-5V)
+  voltage = sensorValue * (5.0 / 1023.0);
   
-  // === AFFICHAGE SUR LCD ===
-  lcd.setCursor(0, 1);  // Ligne 2, colonne 1
+  // Calcul du ratio Rs/R0
+  float Rs = ((5.0 * RL) / voltage) - RL;
+  ratio = Rs / R0;
   
-  // Effacer la ligne en écrivant des espaces
-  lcd.print("                ");  // 16 espaces
-  lcd.setCursor(0, 1);  // Revenir au début de la ligne 2
+  // Estimation approximative en ppm (cette formule est simplifiée)
+  // Pour une mesure précise, utilisez les courbes de calibration du fabricant
+  ppm = 661.5 * pow(ratio, -1.179);
   
-  // Afficher selon le niveau de pollution
-  if (niveauPollution < 100) {
-    lcd.print(niveauPollution, 0);  // 0 décimale
-    lcd.print(" ppm BON");
-  } 
-  else if (niveauPollution < 200) {
-    lcd.print(niveauPollution, 0);
-    lcd.print(" ppm MOYEN");
-  } 
-  else if (niveauPollution < 300) {
-    lcd.print(niveauPollution, 0);
-    lcd.print(" ppm MAUVAIS");
-  }
-  else {
-    lcd.print(niveauPollution, 0);
-    lcd.print(" ppm DANGER");
-  }
+  // Affichage sur l'écran LCD
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Gaz: ");
+  lcd.print(ppm, 1);
+  lcd.print(" ppm");
   
-  // === AFFICHAGE CONSOLE (DEBUG) ===
-  Serial.print("📊 Mesure: ");
-  Serial.print(valeurBrute);
-  Serial.print(" (brut) → ");
-  Serial.print(niveauPollution, 0);
-  Serial.print(" ppm");
-  Serial.print(" [");
+  lcd.setCursor(0, 1);
   
-  // Indicateur qualité air
-  if (niveauPollution < 100) {
-    Serial.print("BON");
-  } else if (niveauPollution < 200) {
-    Serial.print("MOYEN");
-  } else if (niveauPollution < 300) {
-    Serial.print("MAUVAIS");  
+  // Indication du niveau de pollution
+  if (ppm < 50) {
+    lcd.print("Qualite: BONNE");
+  } else if (ppm < 100) {
+    lcd.print("Qualite: MOYENNE");
+  } else if (ppm < 200) {
+    lcd.print("Qualite: MAUVAISE");
   } else {
-    Serial.print("DANGER");
+    lcd.print("ALERTE POLLUTION!");
   }
-  Serial.println("]");
   
-  // === ATTENTE AVANT PROCHAINE MESURE ===
-  delay(INTERVALLE);
+  // Affichage sur le moniteur série pour debugging
+  Serial.print("Valeur capteur: ");
+  Serial.print(sensorValue);
+  Serial.print(" | Tension: ");
+  Serial.print(voltage, 2);
+  Serial.print("V | PPM: ");
+  Serial.println(ppm, 1);
+  
+  delay(2000); // Mise à jour toutes les 2 secondes
 }

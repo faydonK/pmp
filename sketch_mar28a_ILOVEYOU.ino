@@ -1,6 +1,7 @@
-#include <LiquidCrystal.h>
-#define MQ_PIN A0 // Broche analogique à laquelle le MQ-2 est connecté
-#include "rgb_lcd.h"
+#include "rgb_lcd.h"  // Gardons seulement cette bibliothèque
+
+#define MQ_PIN A0
+#define R0 10.0  // Résistance de référence en air propre (à calibrer)
 
 rgb_lcd lcd;
 
@@ -8,52 +9,66 @@ const int colorR = 255;
 const int colorG = 0;
 const int colorB = 0;
 
+int currentGas = 0;  // Index du gaz actuellement affiché
+unsigned long lastUpdate = 0;
+const unsigned long updateInterval = 3000;  // 3 secondes entre chaque gaz
+
 void setup() {
   Serial.begin(9600);
-   lcd.begin(16, 2);
-
-    lcd.setRGB(colorR, colorG, colorB);
-    // Print a message to the LCD.
-    lcd.print("Pollution d'air:");
-
-    delay(1000);
+  lcd.begin(16, 2);
+  lcd.setRGB(colorR, colorG, colorB);
+  
+  // Message initial
+  lcd.setCursor(0, 0);
+  lcd.print("Pollution d'air:");
+  lcd.setCursor(0, 1);
+  lcd.print("Initialisation..");
+  delay(2000);
+  lcd.clear();
 }
 
 void loop() {
-  float sensorVoltage = analogRead(MQ_PIN) * (5.0 / 1023.0); // Conversion de la valeur analogique en tension
-  float RS_air = (5.0 - sensorVoltage) / sensorVoltage; // Résistance du capteur en air propre
-  float ratio = RS_air / ((5.0 / sensorVoltage) - 1.0); // Ratio RS/R0
-
-  // Utilisation du ratio pour estimer les concentrations de gaz
-  float CH4_Concentration = 2.5 * pow(ratio, -1.29);
-  float C4H10_Concentration = 2.8 * pow(ratio, -1.21);
-  float C3H8_Concentration = 2.1 * pow(ratio, -1.16);
-  float H2_Concentration = 2.0 * pow(ratio, -1.24);
-  float Alcohol_Concentration = 3.5 * pow(ratio, -1.25);
-  float Smoke_Concentration = 2.5 * pow(ratio, -1.29);
-
-  // Affichage des concentrations estimées
-  lcd.print("Méthane: ");
-  lcd.println(CH4_Concentration);
-  delay(100000);
-  lcd.setCursor(0, 1);
-  lcd.print("Butane: ");
-  lcd.println(C4H10_Concentration);
-  delay(100000);
-  lcd.setCursor(0, 1);
-  lcd.print("GPL (Propane + Butane) : ");
-  lcd.println(C3H8_Concentration);
-  delay(100000);
-  lcd.setCursor(0, 1);
-  lcd.print("Hydrogene: ");
-  lcd.println(H2_Concentration);
-  delay(100000);
-  lcd.setCursor(0, 1);
-  lcd.print("Alcools: ");
-  lcd.println(Alcohol_Concentration);
-  delay(100000);
-  lcd.setCursor(0, 1);
-  lcd.print("Fumees: ");
-  lcd.println(Smoke_Concentration);
-  delay(100000); // Attendre 1 seconde entre chaque lecture
+  // Lecture du capteur
+  int sensorValue = analogRead(MQ_PIN);
+  float sensorVoltage = sensorValue * (5.0 / 1023.0);
+  
+  // Calcul de la résistance du capteur
+  float RS_gas = ((5.0 * 10.0) / sensorVoltage) - 10.0;  // Avec une résistance de charge de 10kΩ
+  float ratio = RS_gas / R0;
+  
+  // Calcul des concentrations (formules approximatives)
+  float concentrations[6];
+  concentrations[0] = 1000 * pow(ratio, -1.29);  // CH4 (Méthane)
+  concentrations[1] = 1000 * pow(ratio, -1.21);  // C4H10 (Butane)
+  concentrations[2] = 1000 * pow(ratio, -1.16);  // C3H8 (Propane)
+  concentrations[3] = 1000 * pow(ratio, -1.24);  // H2 (Hydrogène)
+  concentrations[4] = 1000 * pow(ratio, -1.25);  // Alcool
+  concentrations[5] = 1000 * pow(ratio, -1.29);  // Fumée
+  
+  String gasNames[6] = {"Methane", "Butane", "Propane", "Hydrogene", "Alcool", "Fumee"};
+  
+  // Affichage rotatif toutes les 3 secondes
+  if (millis() - lastUpdate >= updateInterval) {
+    lcd.clear();
+    
+    // Première ligne : nom du gaz
+    lcd.setCursor(0, 0);
+    lcd.print(gasNames[currentGas]);
+    
+    // Deuxième ligne : concentration
+    lcd.setCursor(0, 1);
+    lcd.print(concentrations[currentGas], 1);
+    lcd.print(" ppm");
+    
+    // Affichage série pour débogage
+    Serial.print(gasNames[currentGas]);
+    Serial.print(": ");
+    Serial.print(concentrations[currentGas]);
+    Serial.println(" ppm");
+    
+    currentGas = (currentGas + 1) % 6;  // Passer au gaz suivant
+    lastUpdate = millis();
+  }
+  
+  delay(100);  // Petit délai pour éviter la surcharge
 }

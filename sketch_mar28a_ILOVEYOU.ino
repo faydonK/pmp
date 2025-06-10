@@ -30,7 +30,7 @@ void setup() {
   
   Serial.println("LCD initialisé - Prêt à mesurer");
   
-  // Test capteur initial
+  // Test capteur initial 
   int test = analogRead(MQ_PIN);
   Serial.print("Capteur MQ-2 test: ");
   Serial.println(test);
@@ -57,4 +57,11 @@ void loop() {
   }
   
   // Debug console
-  Serial.print("Val
+  Serial.print("Valeur capteur: ");
+  Serial.print(valeur);
+  Serial.print(" -> Pollution: ");
+  Serial.print(pollution, 0);
+  Serial.println(" ppm");
+  
+  delay(1000);
+}
